@@ -1,0 +1,723 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Estate Plan Commission Tool</title>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    /* Page + container */
+    body{font-family:Arial;margin:0;background:#f5f5f5;color:#002f6c;}
+    /*.page{max-width:980px;margin:20px auto;padding:16px;}*/
+    .page{
+        /* Grow to (almost) full width on large screens, but stay readable */
+        width: min(1200px, 96vw);   /* try 1320px if you want even wider */
+        margin: 20px auto;
+        padding: 16px;
+        }
+
+
+    /* Cards/sections */
+    .section{margin-bottom:16px;padding:12px;background:#fff;border:1px solid #ccc;border-radius:4px;}
+    .timeline{background:#eef1f6;border-left:4px solid #002f6c;}
+
+    /* Headings */
+    h1{margin:0 0 10px;font-size:22px}
+    h3{margin:0 0 10px}
+
+    /* Compact inputs */
+    input,select,button{padding:6px 8px;font-size:.95rem}
+    button{background:#d91c1c;color:#fff;border:0;cursor:pointer}
+    button:hover{background:#b01919}
+
+    /* === Compact two-column form layout === */
+    .form-grid{
+      display:grid;
+      grid-template-columns:repeat(2,minmax(320px,1fr));
+      gap:10px 18px; /* row | column */
+      align-items:center;
+    }
+    .field{
+      display:grid;
+      grid-template-columns:140px 1fr; /* label | control */
+      gap:8px;
+      align-items:center;
+      background:#fff;
+    }
+    .field label{white-space:nowrap;text-align:right;font-size:.95rem}
+
+    /* Movement inline row below button */
+    .actions{grid-column:1 / -1}
+    .actions button{width:100%;padding:8px 10px;font-weight:600}
+
+    .form-inline{
+      display:grid;
+      grid-template-columns:repeat(6, auto);
+      gap:8px;
+      align-items:center;
+      margin-top:10px;
+    }
+    .form-inline label{justify-self:end;white-space:nowrap}
+
+    /* Tables */
+    table{width:100%;border-collapse:collapse;background:#fff}
+    th,td{border:1px solid #ccc;padding:8px;text-align:center}
+    thead th{background:#f3f6fb}
+
+    /* Responsive: stack to one column */
+    @media (max-width:720px){
+      .form-grid{grid-template-columns:1fr}
+      .form-inline{grid-template-columns:1fr 1fr}
+      .field{grid-template-columns:120px 1fr}
+    }
+
+    #timelineEntries.compact { font-size: 10px; line-height: 1.25; }
+    #timelineEntries.compact table th,
+    #timelineEntries.compact table td { padding: 4px 6px; }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <h1>Estate Plan Commission Tool</h1>
+
+    <div class="section">
+      <h3>Complete below:</h3>
+
+      <form class="form-grid" onsubmit="return false;">
+        <div class="field">
+          <label for="brokercode">Broker Code</label>
+          <input type="number" id="brokercode" value="123456" />
+        </div>
+        <div class="field">
+          <label for="dob">Date of Birth</label>
+          <input type="date" id="dob" value="1984-01-01" />
+        </div>
+
+        <div class="field">
+          <label for="startDate">Plan Start Date</label>
+          <input type="date" id="startDate" />
+        </div>
+
+        <div class="field">
+          <label for="currentDate">Current Date</label>
+          <input type="date" id="currentDate" />
+        </div>
+
+        <div class="field">
+          <label for="initialPremium">Initial Premium (R)</label>
+          <input type="number" id="initialPremium" value="750" />
+        </div>
+
+        <div class="field">
+          <label for="growthRate">Premium Growth %</label>
+          <input type="number" id="growthRate" value="10" />
+        </div>
+
+        <div class="field">
+          <label for="freqFactor">Frequency Factor</label>
+          <input type="number" id="freqFactor" value="11.4" />
+        </div>
+
+        <div class="field">
+          <label for="commPercent">Commission %</label>
+          <input type="number" id="commPercent" value="100" />
+        </div>
+
+        <!-- Button row spans both columns -->
+        <div class="actions">
+          <button type="button" onclick="showMovementForm()">Add Commission Movement</button>
+
+          <!-- Movement inline form -->
+          <div id="movementForm" class="form-inline" style="display:none;">
+            <label for="moveDate">Movement Date</label>
+            <input type="date" id="moveDate" />
+            <label for="moveType">Movement Type</label>
+            <select id="moveType"></select>
+            <label for="moveDelta">Premium Delta (+ or -)</label>
+            <input type="number" id="moveDelta" />
+            <button id="confirmBtn" onclick="confirmMovement()">Confirm</button>
+            <button type="button" id="cancelEditBtn" style="display:none;" onclick="cancelEdit()">Cancel</button>
+          </div>
+        </div>
+      </form>
+    </div>
+
+    <div class="section">
+      <h3>Ad-hoc Movement History</h3>
+      <table id="movementHistoryTable">
+        <thead><tr><th>Date</th><th>Type</th><th>Delta</th><th>Actions</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+
+   <div class="section"> 
+      <h3>Current Plan Status</h3>
+      <p id="planStatusDisplay">Active</p>
+    </div>  
+
+    <div class="section timeline" id="timeline">
+      <h3>Policy Timeline</h3>
+      <div id="timelineEntries" class="compact"></div>
+    </div>
+  </div>
+
+  <script>
+    let manualMovements = [];
+    let planStatus = 'Active';
+    let editingIndex = null;  // null = adding; number = editing that row
+
+    function computePlanStatus() {
+      let status = 'Active';
+      manualMovements.forEach(m => {
+        if (m.type === 'LAPSE') status = 'Lapse';
+        else if (m.type === 'RELAP') status = 'Active';
+      });
+      return status;
+    }
+    function updateMoveTypeOptions() {
+      const typeSelect = document.getElementById('moveType');
+      typeSelect.innerHTML = '';
+      const placeholder = new Option('--SELECT--', 'SELECT');
+      placeholder.disabled = true; placeholder.selected = true;
+      typeSelect.add(placeholder);
+      const allowed = planStatus === 'Active' ? ['ALTER','LAPSE'] : ['RELAP'];
+      allowed.forEach(t => typeSelect.add(new Option(t, t)));
+    }
+    function renderMovementHistory() {
+      const tbody = document.getElementById('movementHistoryTable').querySelector('tbody');
+      tbody.innerHTML = '';
+      manualMovements.forEach((m, i) => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td>${m.date}</td>
+          <td>${m.type}</td>
+          <td>${m.delta.toFixed(2)}</td>
+          <td>
+            <button onclick="startEditMovement(${i})">Edit</button>
+            <button onclick="deleteMovement(${i})">Delete</button>
+          </td>`;
+        tbody.appendChild(tr);
+      });
+    }
+
+    function startEditMovement(index) {
+      editingIndex = index;
+      const m = manualMovements[index];
+
+      updateMoveTypeOptions();
+      const sel = document.getElementById('moveType');
+      if (![...sel.options].some(o => o.value === m.type)) {
+        sel.add(new Option(m.type, m.type), undefined);
+      }
+
+      document.getElementById('moveDate').value = m.date;
+      document.getElementById('moveType').value = m.type;
+
+      if (m.type === 'LAPSE') {
+        document.getElementById('moveDelta').disabled = true;
+        document.getElementById('moveDelta').value =
+          (-premiumAtLapseDay(m.date)).toFixed(2);
+      } else {
+        document.getElementById('moveDelta').disabled = false;
+        document.getElementById('moveDelta').value = m.delta;
+      }
+
+      document.getElementById('confirmBtn').textContent = 'Update';
+      document.getElementById('cancelEditBtn').style.display = 'inline-block';
+      document.getElementById('movementForm').style.display = 'grid';
+    }
+
+    function cancelEdit() {
+      editingIndex = null;
+      document.getElementById('confirmBtn').textContent = 'Confirm';
+      document.getElementById('cancelEditBtn').style.display = 'none';
+      document.getElementById('moveDate').value = '';
+      document.getElementById('moveDelta').value = '';
+      const moveType = document.getElementById('moveType');
+      if (moveType.options.length) moveType.selectedIndex = 0;
+      document.getElementById('moveDelta').disabled = false;
+      updateMoveTypeOptions();
+    }
+
+    function updatePlanStatusDisplay() {
+      planStatus = computePlanStatus();
+      document.getElementById('planStatusDisplay').textContent = planStatus;
+      updateMoveTypeOptions();
+    }
+    function showMovementForm() {
+      updateMoveTypeOptions();
+      document.getElementById('movementForm').style.display = 'grid';
+    }
+
+    function pri(t){
+      switch(t){
+        case 'NB': return 0;
+        case 'INDEX': return 1;
+        case 'RELAP': return 2;
+        case 'ALTER': return 3;
+        case 'LAPSE': return 4;
+        default: return 9;
+      }
+    }
+
+    function premiumBefore(boundStr) {
+      const base   = parseFloat(document.getElementById('initialPremium').value);
+      const growth = parseFloat(document.getElementById('growthRate').value) / 100;
+      const start  = new Date(document.getElementById('startDate').value);
+      const bound  = new Date(boundStr);
+
+      const events = [];
+      let sd = new Date(start), year = 0;
+      while (sd < bound) {
+        events.push({ date: new Date(sd), type: (year === 0 ? 'NB' : 'INDEX') });
+        sd.setFullYear(sd.getFullYear() + 1); year++;
+      }
+      manualMovements.forEach(m => {
+        const md = new Date(m.date);
+        if (md < bound) {
+          const isRelap = (m.type === 'RELAP');
+          events.push({ date: md, type: isRelap ? 'NB' : m.type, delta: m.delta, isRelap });
+        }
+      });
+      events.sort((a,b)=> a.date - b.date || (pri(a.type) - pri(b.type)));
+
+      let current = 0, inForce = false;
+      for (const e of events) {
+        if (!inForce && e.type !== 'NB') continue;
+        let delta;
+        if (e.isRelap)             delta = e.delta;
+        else if (e.type==='NB')    delta = base;
+        else if (e.type==='INDEX') delta = current * growth;
+        else if (e.type==='LAPSE') delta = -current;
+        else                       delta = e.delta;
+        const premium = current + delta;
+        if (e.type==='NB') inForce = true;
+        if (e.type==='LAPSE') inForce = false;
+        current = premium;
+      }
+      return current;
+    }
+
+    function premiumAtLapseDay(lapseDateStr){
+      const base   = parseFloat(document.getElementById('initialPremium').value);
+      const growth = parseFloat(document.getElementById('growthRate').value) / 100;
+      const start  = new Date(document.getElementById('startDate').value);
+      const bound  = new Date(lapseDateStr);
+
+      const events = [];
+      let sd = new Date(start), year = 0;
+      while (sd <= bound) {
+        events.push({ date: new Date(sd), type: (year === 0 ? 'NB' : 'INDEX') });
+        sd.setFullYear(sd.getFullYear() + 1); year++;
+      }
+      manualMovements.forEach(m => {
+        const md = new Date(m.date);
+        if (md < bound) {
+          const isRelap = (m.type === 'RELAP');
+          events.push({ date: md, type: isRelap ? 'NB' : m.type, delta: m.delta, isRelap });
+        }
+      });
+
+      events.sort((a,b)=> a.date - b.date || (pri(a.type) - pri(b.type)));
+
+      let current = 0, inForce = false;
+      for (const e of events) {
+        if (!inForce && e.type !== 'NB') continue;
+        let delta;
+        if (e.isRelap)             delta = e.delta;
+        else if (e.type==='NB')    delta = base;
+        else if (e.type==='INDEX') delta = current * growth;
+        else if (e.type==='LAPSE') delta = -current;
+        else                       delta = e.delta;
+        const premium = current + delta;
+        if (e.type==='NB') inForce = true;
+        if (e.type==='LAPSE') inForce = false;
+        current = premium;
+      }
+      return current;
+    }
+
+    function confirmMovement() {
+      const raw = document.getElementById('moveDate').value;
+      if (!raw) return;
+      const date = formatDateLocal(new Date(raw));
+      const type = document.getElementById('moveType').value;
+
+      let delta = parseFloat(document.getElementById('moveDelta').value) || 0;
+      if (type === 'LAPSE') delta = -premiumAtLapseDay(date);
+
+      const item = { date, type, delta };
+
+      if (editingIndex === null) manualMovements.push(item);
+      else manualMovements[editingIndex] = item;
+
+      manualMovements.sort((a,b)=> new Date(a.date) - new Date(b.date));
+
+      drawTimeline();
+      renderMovementHistory();
+      updatePlanStatusDisplay();
+      cancelEdit();
+    }
+
+    function deleteMovement(index) {
+      manualMovements.splice(index, 1);
+      if (editingIndex === index) cancelEdit();
+      else if (editingIndex !== null && index < editingIndex) editingIndex -= 1;
+
+      drawTimeline();
+      renderMovementHistory();
+      updatePlanStatusDisplay();
+    }
+
+    function getAgeNextBirthday(dob, referenceDate) {
+      const dobDate = new Date(dob);
+      const refDate = new Date(referenceDate);
+      let age = refDate.getFullYear() - dobDate.getFullYear();
+      const refMonth = refDate.getMonth(), refDay = refDate.getDate();
+      const dobMonth = dobDate.getMonth(), dobDay = dobDate.getDate();
+      if (refMonth > dobMonth || (refMonth === dobMonth && refDay >= dobDay)) age += 1;
+      return age;
+    }
+
+    function calcRegLimitPercent(ageNextBirthday){
+      const N = Math.max(10, 75 - ageNextBirthday);
+      return Math.min(N * 0.0325, 0.85);
+    }
+
+    const CB_TABLE = [
+      {m:0, cb1:1.00,   cb2:1.00},{m:1, cb1:1.00,   cb2:1.00},{m:2, cb1:1.00,   cb2:1.00},
+      {m:3, cb1:1.00,   cb2:1.00},{m:4, cb1:1.00,   cb2:1.00},{m:5, cb1:1.00,   cb2:1.00},
+      {m:6, cb1:1.00,   cb2:1.00},{m:7, cb1:0.7083, cb2:1.00},{m:8, cb1:0.6667, cb2:1.00},
+      {m:9, cb1:0.6250, cb2:1.00},{m:10,cb1:0.5833, cb2:1.00},{m:11,cb1:0.5417, cb2:1.00},
+      {m:12,cb1:0.50,   cb2:1.00},{m:13,cb1:0.4583, cb2:0.9167},{m:14,cb1:0.4167, cb2:0.8333},
+      {m:15,cb1:0.3750, cb2:0.75},{m:16,cb1:0.3333, cb2:0.6667},{m:17,cb1:0.2917, cb2:0.5833},
+      {m:18,cb1:0.25,   cb2:0.50},{m:19,cb1:0.2083, cb2:0.4167},{m:20,cb1:0.1667, cb2:0.3333},
+      {m:21,cb1:0.1250, cb2:0.25},{m:22,cb1:0.0833, cb2:0.1667},{m:23,cb1:0.0417, cb2:0.0833},
+      {m:24,cb1:0.00,   cb2:0.00},
+    ];
+    function getClawbackPerc(termMonths) {
+      const t = Math.max(0, Math.min(24, Math.floor(termMonths)));
+      return CB_TABLE[t];
+    }
+    function monthsBetween(a,b){return (b.getFullYear()-a.getFullYear())*12+(b.getMonth()-a.getMonth());}
+
+    function isPlanActiveOn(targetDate, ignoreSameDayLapse=false) {
+      const start = new Date(document.getElementById('startDate').value);
+      const keyEvents = [{ date: new Date(start), type: 'NB' }];
+      manualMovements.forEach(m => {
+        const d = new Date(m.date);
+        if (d <= targetDate) {
+          if (m.type === 'RELAP') keyEvents.push({ date: d, type: 'NB' });
+          if (m.type === 'LAPSE') {
+            if (ignoreSameDayLapse && d.getTime() === targetDate.getTime()) {
+            } else {
+              keyEvents.push({ date: d, type: 'LAPSE' });
+            }
+          }
+        }
+      });
+      function kpri(t){ return t === 'NB' ? 0 : (t === 'LAPSE' ? 2 : 1); }
+      keyEvents.sort((a,b)=>{ const d=a.date-b.date; if(d) return d; return kpri(a.type)-kpri(b.type); });
+      let inForce = false;
+      for (const e of keyEvents) {
+        if (e.type==='NB') inForce = true;
+        if (e.type==='LAPSE') inForce = false;
+      }
+      return inForce;
+    }
+
+    function drawTimeline() {
+      const dob = document.getElementById('dob').value;
+      const startDate = new Date(document.getElementById('startDate').value);
+      const endDate = new Date(document.getElementById('currentDate').value);
+      const growth = parseFloat(document.getElementById('growthRate').value) / 100;
+      const ff = parseFloat(document.getElementById('freqFactor').value);
+      const cp = parseFloat(document.getElementById('commPercent').value) / 100;
+      const base = parseFloat(document.getElementById('initialPremium').value);
+
+      const events = [];
+      let year = 0;
+      const sd = new Date(startDate);
+      while (sd <= endDate) {
+        events.push({ date: new Date(sd), type: (year === 0 ? 'NB' : 'INDEX') });
+        sd.setFullYear(sd.getFullYear() + 1); year++;
+      }
+      manualMovements.forEach(m => {
+        const isRelap = (m.type === 'RELAP');
+        events.push({ date: new Date(m.date), type: isRelap ? 'NB' : m.type, delta: m.delta, isRelap });
+      });
+      events.sort((a,b)=> new Date(a.date)-new Date(b.date) || (pri(a.type)-pri(b.type)));
+
+      let current = 0, inForce = false;
+      const sets = [];
+      let nextSetId = 1;
+
+      const ledger = [];
+      let movementCount = 0;
+      const setFundRunningCount = {}; // key: "<setId>|<UF1|UF2>" -> 1,2,3,...
+      let emitOrdinal = 0; // increases with every emit
+      function emit(e, dueDate, commType, amount, setId, age, premium, delta, isClawback=false, cbEventIndex=0, cbSeq=0, movCnt=0) {
+        const nowCutoff = new Date(document.getElementById('currentDate').value);
+        if (dueDate > nowCutoff) return;
+        if (e.date > nowCutoff) return;
+
+        // Only block natives when not in force; clawbacks always post
+        if (!isClawback) {
+            if (!isPlanActiveOn(dueDate, /*ignoreSameDayLapse*/ true)) return;
+        }
+
+        // >>> assign "Set Count" at the moment of posting (no retro changes)
+        let setCountNow = '';
+        if (setId) {
+            const key = `${setId}|${commType}`;
+            setFundRunningCount[key] = (setFundRunningCount[key] || 0) + 1;
+            setCountNow = setFundRunningCount[key];
+        }
+
+
+            // --- VAT (15%) ---
+            const VAT_RATE = 0.15;                    // later you can toggle by broker VAT status
+            const vatAmount = amount * VAT_RATE;
+
+            // 👉 broker code from the input
+            const brokerCode = (document.getElementById('brokercode')?.value || '').toString().trim();
+
+            // 👉 termN from the set that this row belongs to (if any)
+            let termNOut = '';
+            if (setId) {
+                const s = sets.find(ss => ss.id === setId);
+                if (s && typeof s.termN !== 'undefined') termNOut = s.termN;
+            }
+
+        ledger.push({
+            movementType: e.type,
+            movementDate: new Date(e.date),
+            dueDate: new Date(dueDate),
+            commType,
+            amount: +amount.toFixed(2),
+            vatAmount: +vatAmount.toFixed(2),
+            setId,
+            age,
+            premiumOut: (commType==='UF1') ? premium.toFixed(2) : '0.00',
+            deltaOut:   (commType==='UF1') ? delta.toFixed(2)   : '0.00',
+            isClawback,
+            cbEventIndex,
+            cbSeq,
+            movCnt,
+            setCount: setCountNow,     // <<< stored per row
+            brokerCode,
+            termN: termNOut,
+            ord: ++emitOrdinal,
+        });
+      }
+
+
+      let negEventIdx = 0;
+
+      for (let e of events) {
+        const thisMovCnt = ++movementCount;
+        if (!inForce && e.type !== 'NB') continue;
+
+        let delta;
+        if (e.isRelap)             delta = e.delta;
+        else if (e.type==='NB')    delta = base;
+        else if (e.type==='INDEX') delta = current * growth;
+        else if (e.type==='LAPSE') delta = -current;
+        else                       delta = e.delta;
+
+        const premium = current + delta;
+        const age = getAgeNextBirthday(dob, e.date);
+
+        if (delta > 0) {
+          const rl = calcRegLimitPercent(age);
+          const amountUF1 = delta * ff * rl * cp;
+          const amountUF2 = amountUF1 / 3;
+
+          const termN = Math.max(10, 75 - age);
+
+          const setId = nextSetId++;
+          const due2 = new Date(e.date); due2.setFullYear(due2.getFullYear()+1);
+
+          sets.push({
+            id: setId,
+            date: new Date(e.date),
+            due2: new Date(due2),
+            movementType: e.type,
+            origPosDelta: delta,
+            remPosDelta: delta,
+            uf1: amountUF1,
+            uf2: amountUF2,
+            uf2Due: amountUF2,
+            movCnt: thisMovCnt,
+            termN,
+          });
+
+          emit(e, new Date(e.date), 'UF1', amountUF1, setId, age, premium, delta, false, 0, 0, thisMovCnt);
+
+        } else if (delta < 0) {
+            let RemainingNegPremiumDelta = Math.abs(delta);
+            const txnDate = new Date(e.date);
+            const EPS = 1e-6;
+            const thisNegIdx = negEventIdx++;
+            let seq = 0;
+
+            for (let i = sets.length - 1; i >= 0 && RemainingNegPremiumDelta > EPS; i--) {
+                const s = sets[i];
+                if (s.remPosDelta <= EPS) continue;
+
+                const term = monthsBetween(s.date, txnDate);
+                const { cb1, cb2 } = getClawbackPerc(term);
+
+                if (cb1 <= 0 && cb2 <= 0) continue;
+
+                const remBefore = s.remPosDelta;
+
+                const allocUnits = Math.min(RemainingNegPremiumDelta, remBefore);
+                if (allocUnits <= EPS) continue;
+                const PR = allocUnits / remBefore;
+
+                if (cb1 > 0 && s.uf1 > EPS) {
+                  const cbAmt1 = -(s.uf1 * PR * cb1);
+                  emit(e, new Date(s.date), 'UF1', cbAmt1, s.id, age, premium, -allocUnits, true, thisNegIdx, seq++, thisMovCnt);
+                }
+
+                if (cb2 > 0 && s.uf2 > EPS) {
+                  const cbAmt2 = -(s.uf2 * PR * cb2);
+                  if (txnDate >= s.due2) {
+                    emit(e, new Date(s.due2), 'UF2', cbAmt2, s.id, age, premium, 0, true, thisNegIdx, seq++, thisMovCnt);
+                  } else {
+                    s.uf2Due = Math.max(0, s.uf2Due + cbAmt2);
+                  }
+                }
+
+                s.remPosDelta = remBefore - allocUnits;
+                RemainingNegPremiumDelta -= allocUnits;
+            }
+        }
+
+        if (e.type==='NB') inForce = true;
+        if (e.type==='LAPSE') inForce = false;
+        current = premium;
+      }
+
+      const nowCutoff = new Date(document.getElementById('currentDate').value);
+      const EPS = 1e-6;
+      for (const s of sets) {
+        if (s.due2 <= nowCutoff && isPlanActiveOn(s.due2, true) && s.uf2Due > EPS) {
+          const eSet = { type: s.movementType, date: new Date(s.date) };
+          const ageAtSet = getAgeNextBirthday(document.getElementById('dob').value, s.date);
+          emit(eSet, new Date(s.due2), 'UF2', s.uf2Due, s.id, ageAtSet, 0, 0, false, 0, 0, s.movCnt);
+        }
+      }
+
+     // const countMap = {};
+     // for (const r of ledger) {
+     //   if (!r.setId) continue;
+     //   const key = `${r.setId}|${r.commType}`;
+     //   countMap[key] = (countMap[key] || 0) + 1;
+     // }
+
+      function feeOrder(t){ return t === 'UF1' ? 0 : (t === 'UF2' ? 1 : 2); }
+
+      ledger.sort((a, b) => {
+        if (a.movCnt !== b.movCnt) return a.movCnt - b.movCnt; // movement-by-movement
+        return a.ord - b.ord;                                   // preserve emission order
+        });
+
+      const table = document.createElement('table');
+      table.innerHTML = `
+        <thead>
+          <tr>
+            <th>Transaction #</th>
+            <th>Movement Count</th>
+            <th>Movement Type</th>
+            <th>Movement Date</th>
+            <th>Commission Due Date</th>
+            <th>Commission Type</th>
+            <th>Commission Amount</th>
+            <th>VAT Amount</th>
+            <th>Broker Code</th>
+            <th>Commission Term</th>
+            <th>Age Next Birthday</th>
+            <th>Monthly Premium</th>
+            <th>Premium Delta</th>
+            <th>SET #</th>
+            <th>Set Count</th>
+          </tr>
+        </thead>`;
+      const tbody = document.createElement('tbody');
+      let tx = 1;
+      for (const r of ledger) {
+        
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td>${tx++}</td>
+          <td>${r.movCnt}</td>
+          <td>${r.movementType}</td>
+          <td>${formatDateLocal(r.movementDate)}</td>
+          <td>${formatDateLocal(r.dueDate)}</td>
+          <td>${r.commType}</td>
+          <td>${r.amount.toFixed(2)}</td>
+          <td>${(r.vatAmount ?? 0).toFixed(2)}</td>
+          <td>${r.brokerCode || ''}</td>           
+          <td>${r.termN !== '' ? r.termN : ''}</td>
+          <td>${r.age}</td>
+          <td>${r.premiumOut}</td>
+          <td>${r.deltaOut}</td>
+          <td>${r.setId ? `SET ${r.setId}` : 'N/A'}</td>
+          <td>${r.setId ? r.setCount : ''}</td>`;
+        tbody.appendChild(tr);
+      }
+      table.appendChild(tbody);
+      const container = document.getElementById('timelineEntries');
+      container.innerHTML = '';
+      container.appendChild(table);
+    }
+
+    function attachInputListeners() {
+      const inputs = document.querySelectorAll(
+        '#dob, #startDate, #currentDate, #initialPremium, #growthRate, #freqFactor, #commPercent'
+      );
+      inputs.forEach(i => i.addEventListener('input', drawTimeline));
+
+      const moveType  = document.getElementById('moveType');
+      const moveDelta = document.getElementById('moveDelta');
+      const moveDate  = document.getElementById('moveDate');
+
+      function maybeFillLapseDelta() {
+        if (moveType.value === 'LAPSE' && moveDate.value) {
+          moveDelta.value = (-premiumAtLapseDay(formatDateLocal(new Date(moveDate.value)))).toFixed(2);
+        }
+      }
+      moveType.addEventListener('change', () => {
+        if (moveType.value === 'LAPSE') { moveDelta.disabled = true; maybeFillLapseDelta(); }
+        else { moveDelta.disabled = false; moveDelta.value = ''; }
+      });
+      moveDate.addEventListener('change', maybeFillLapseDelta);
+    }
+
+    function formatDateLocal(date) {
+      const y = date.getFullYear();
+      const m = String(date.getMonth()+1).padStart(2,'0');
+      const d = String(date.getDate()).padStart(2,'0');
+      return `${y}-${m}-${d}`;
+    }
+
+    window.onload = function () {
+      document.getElementById('dob').value = '1984-01-01';
+      const today = new Date();
+      const nextMonth = new Date(today.getFullYear(), today.getMonth() + 1, 1);
+      document.getElementById('startDate').value = formatDateLocal(nextMonth);
+
+      const fiveYearsLater = new Date(nextMonth);
+      fiveYearsLater.setFullYear(fiveYearsLater.getFullYear() + 5);
+      document.getElementById('currentDate').value = formatDateLocal(fiveYearsLater);
+
+      attachInputListeners();
+      updateMoveTypeOptions();
+      drawTimeline();
+      renderMovementHistory();
+      updatePlanStatusDisplay();
+    };
+  </script>
+</body>
+</html>
