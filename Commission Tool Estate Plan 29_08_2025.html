@@ -457,13 +457,15 @@
       let emitOrdinal = 0; // increases with every emit
       function emit(e, dueDate, commType, amount, setId, age, premium, delta, isClawback=false, cbEventIndex=0, cbSeq=0, movCnt=0) {
         const nowCutoff = new Date(document.getElementById('currentDate').value);
-        if (dueDate > nowCutoff) return;
-        if (e.date > nowCutoff) return;
+        //if (dueDate > nowCutoff) return;
+        //if (e.date > nowCutoff) return;
 
         // Only block natives when not in force; clawbacks always post
-        if (!isClawback) {
-            if (!isPlanActiveOn(dueDate, /*ignoreSameDayLapse*/ true)) return;
-        }
+        //if (!isClawback) {
+        //    if (!isPlanActiveOn(dueDate, /*ignoreSameDayLapse*/ true)) return;
+       // }
+
+       if(e.date>nowCutoff) retunr;
 
         // >>> assign "Set Count" at the moment of posting (no retro changes)
         let setCountNow = '';
@@ -552,6 +554,7 @@
           });
 
           emit(e, new Date(e.date), 'UF1', amountUF1, setId, age, premium, delta, false, 0, 0, thisMovCnt);
+          emit(e, new Date(due2), 'UF2', amountUF2, setId, age, /*premium*/0, /*delta*/0, false, 0, 0, thisMovCnt);
 
         } else if (delta < 0) {
             let RemainingNegPremiumDelta = Math.abs(delta);
@@ -582,12 +585,10 @@
 
                 if (cb2 > 0 && s.uf2 > EPS) {
                   const cbAmt2 = -(s.uf2 * PR * cb2);
-                  if (txnDate >= s.due2) {
-                    emit(e, new Date(s.due2), 'UF2', cbAmt2, s.id, age, premium, 0, true, thisNegIdx, seq++, thisMovCnt);
-                  } else {
-                    s.uf2Due = Math.max(0, s.uf2Due + cbAmt2);
-                  }
+                  // Always post a UF2 clawback at the UF2 due date (can be future-dated)
+                  emit(e, new Date(s.due2), 'UF2', cbAmt2, s.id, age, premium, 0, true, thisNegIdx, seq++, thisMovCnt);
                 }
+
 
                 s.remPosDelta = remBefore - allocUnits;
                 RemainingNegPremiumDelta -= allocUnits;
@@ -601,13 +602,13 @@
 
       const nowCutoff = new Date(document.getElementById('currentDate').value);
       const EPS = 1e-6;
-      for (const s of sets) {
-        if (s.due2 <= nowCutoff && isPlanActiveOn(s.due2, true) && s.uf2Due > EPS) {
-          const eSet = { type: s.movementType, date: new Date(s.date) };
-          const ageAtSet = getAgeNextBirthday(document.getElementById('dob').value, s.date);
-          emit(eSet, new Date(s.due2), 'UF2', s.uf2Due, s.id, ageAtSet, 0, 0, false, 0, 0, s.movCnt);
-        }
-      }
+      //for (const s of sets) {
+      //  if (s.due2 <= nowCutoff && isPlanActiveOn(s.due2, true) && s.uf2Due > EPS) {
+      //    const eSet = { type: s.movementType, date: new Date(s.date) };
+      //    const ageAtSet = getAgeNextBirthday(document.getElementById('dob').value, s.date);
+      //    emit(eSet, new Date(s.due2), 'UF2', s.uf2Due, s.id, ageAtSet, 0, 0, false, 0, 0, s.movCnt);
+      //  }
+      //}
 
      // const countMap = {};
      // for (const r of ledger) {
@@ -620,6 +621,11 @@
 
       ledger.sort((a, b) => {
         if (a.movCnt !== b.movCnt) return a.movCnt - b.movCnt; // movement-by-movement
+       // if (a.dueDate.getTime() !== b.dueDate.getTime())
+       //   return a.dueDate - b.dueDate;
+       // if ((a.setId||0) !== (b.setId||0)) return (b.setId||0) -(a.setId||0);
+      //  if (feeOrder(a.commType) !== feeOrder(b.commType))
+      //    return feeOrder(a.commType) - feeOrder(b.commType)
         return a.ord - b.ord;                                   // preserve emission order
         });
 
